@@ -1,36 +1,46 @@
 #!/bin/bash
 
-TMP_DIR=$(mktemp -d)
+set -euo pipefail
+
+# Check arguments
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 archive.tgz" >&2
+    exit 1
+fi
+
+ARCHIVE=$1
+
+if [ ! -f "$ARCHIVE" ]; then
+    echo "Error: '$ARCHIVE' not found" >&2
+    exit 1
+fi
+
+# Remember where we started so we can write the cleaned tar here
 HERE=$(pwd)
-FILE_TO_TAR=$1
 
-if [[ -f "$FILE_TO_TAR" ]]; then
-  tar -xzf "$FILE_TO_TAR" -C "$TMP_DIR"
-else
-  echo "Error in 1"
-  exit 1
-fi
+# Make scratch directory
+SCRATCH=$(mktemp -d)
 
-if [[ -d "$TMP_DIR" ]]; then
-  grep -rl "DELETE ME!" "$TMP_DIR" | xargs rm -f
-else
-  echo "Error in 2"
-  exit 1
-fi
+cleanup() {
+    rm -rf "$SCRATCH"
+}
+trap cleanup EXIT
 
-#For Creation:
-BIG_DIR="big_dir.tgz"
-LITTLE_DIR="little_dir.tgz"
+# Extract archive into scratch directory
+tar -xzf "$ARCHIVE" -C "$SCRATCH"
 
-if [[ "$FILE_TO_TAR" == "$BIG_DIR" ]]; then
-  cd "$TMP_DIR"
-  tar -czf "cleaned_big_dir.tgz"
-  mv "clean_big_dir.tgz" "$HERE"
-elif [[ "$FILE_TO_TAR" == "$LITTLE_DIR" ]]; then
-  cd "$TMP_DIR"
-  tar -czf "cleaned_little_dir.tgz"
-  mv "clean_little_dir.tgz" "$HERE"
-else
-  echo "Error in 3"
-  exit 1
-fi
+# Remove all files that contain the line "DELETE ME!"
+# (work only on regular files, handle spaces with -print0 / -d '')
+while IFS= read -r -d '' file; do
+    if grep -q 'DELETE ME!' "$file"; then
+        rm -f "$file"
+    fi
+done < <(find "$SCRATCH" -type f -print0)
+
+# Build cleaned archive name: cleaned_<original-name>.tgz
+BASE_NAME=$(basename "$ARCHIVE")
+NEW_NAME="cleaned_${BASE_NAME}"
+
+# Create new tar.gz from the contents of SCRATCH (no scratch path in names)
+cd "$SCRATCH"
+tar -czf "$HERE/$NEW_NAME" .
